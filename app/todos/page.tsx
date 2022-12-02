@@ -1,158 +1,12 @@
 'use client';
 
-import {v4 as uuidv4} from 'uuid';
 import {KeyboardEvent, useEffect, useState} from "react";
-import {getDatabase, set, ref, onValue, get, child, push, update} from "firebase/database";
-import {getFirestore, collection, addDoc, getDocs } from "@firebase/firestore";
-
-import { app } from '../firebase';
-
-const Button = ({name, className, handleClick}: { name: string, className?: string, handleClick: () => void }) => (
-    <button
-        className={`rounded-xl px-4 py-3 bg-blue-400 hover:bg-blue-500 font-semibold text-white transition-colors duration-300 ease-in-out ${className}`}
-        onClick={handleClick}
-    >
-        {name}
-    </button>
-);
-
-const Paper = ({children}: { children: any }) => (
-    <div className={'mt-4 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-gray-800 dark:text-gray-100'}>
-        {children}
-    </div>
-)
-
-const TodoItem = ({children, handleClick}: { children: any, handleClick: () => void }) => (
-    <div
-        className={'bg-gray-50 dark:bg-gray-800 p-4 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 hover:shadow-sm transition ease-in-out duration-400  hover:cursor-pointer select-none text-gray-800 dark:text-gray-100 w-full'}
-        onClick={handleClick}
-    >
-        {children}
-    </div>
-);
-
-const Card = ({className, children}: { className: string, children: any }) => (
-    <div className={`p-8 rounded-xl shadow-sm bg-white dark:bg-gray-900 ${className}`}>
-        {children}
-    </div>
-)
-
-interface TodoProps {
-    id: string;
-    name: string;
-    done: boolean;
-}
-
-/**
- *add new todos
- *
- * @param todoId
- * @param todoName
- * @param todoDone
- */
-const addNewTodo = ({ todoId, todoName, todoDone }: { todoId: string, todoName: string, todoDone: boolean}) => {
-    const db = getDatabase(app);
-
-    const todoData = {
-        id: todoId,
-        done: todoDone,
-        name: todoName,
-    };
-
-    set(ref(db, 'todos/' + todoId), todoData)
-};
-
-const updateTodo = ({ todoId, todoName, todoDone }: { todoId: string, todoName: string, todoDone: boolean}) => {
-    const db = getDatabase(app);
-
-    const todoData = {
-        id: todoId,
-        done: todoDone,
-        name: todoName,
-    };
-
-    const newTodoKey = push(child(ref(db), 'todos')).key;
-
-    const updates: any = {};
-    updates['/todos/' + newTodoKey] = todoData;
-
-    update(ref(db), updates)
-        .then(() => {
-            console.log('todo saved successfully')
-        })
-        .catch((error) => {
-            console.log('something went error when trying to save todo')
-        })
-};
-
-/**
- * retrieve and listen todos
- *
- * @param setTodos
- */
-const retrieveAndListenTodos = (setTodos:(todos: []) => void) => {
-    const db = getDatabase(app);
-    const todos = ref(db, 'todos/');
-
-    onValue(todos, (snapshot) => {
-        if (snapshot.exists()) {
-            setTodos(snapshot.val());
-        }  else {
-            console.log("No data available");
-        }
-    });
-};
-
-/**
- * retrieve todos once
- *
- * @param setTodos
- */
-const retrieveTodosOnce = (setTodos:(todos: []) => void) => {
-    const dbRef = ref(getDatabase(app));
-
-    get(child(dbRef, 'todos/'))
-        .then((snapshot) => {
-            if (snapshot.exists()) {
-                setTodos(snapshot.val());
-                console.log(snapshot.val());
-            } else {
-                console.log('no data available');
-            }
-        })
-        .catch((error) => {
-            console.log('error', error);
-        })
-}
-
-/**
- * Firestore 🔥
- * ===============================
- */
-const firestoreAddNewTodo = async ({ todoName, todoDone }: { todoName: string, todoDone: boolean}) => {
-    const db = getFirestore(app);
-
-    try {
-        const docRef = await addDoc(collection(db, 'todos'), {
-            name: todoName,
-            done: todoDone,
-        })
-
-        console.log("Document written with ID: ", docRef.id);
-    } catch (e) {
-        console.error("Error adding document: ", e);
-    }
-}
-
-const firestoreGetTodos = async () => {
-    const db = getFirestore(app);
-
-    const querySnapshot = await getDocs(collection(db, "todos"));
-
-    querySnapshot.forEach((doc) => {
-        console.log(`firestore: ${doc.id} => ${doc.data().name}`, doc);
-    });
-}
+import {TodoProps} from "../../types/todo";
+import {firestoreAddTodo, firestoreGetTodos, firestoreUpdateTodo} from "../../services/firestore";
+import Button from "./Button";
+import Paper from "./Paper";
+import Card from "./Card";
+import TodoItem from "./TodoItem";
 
 export default function Page() {
     const [editMode, setEditMode] = useState<TodoProps | null>(null);
@@ -160,22 +14,26 @@ export default function Page() {
     const [todos, setTodos] = useState<TodoProps[]>([]);
 
     useEffect(() => {
-        // retrieveTodosOnce((todos) => setTodos(todos));
-
-        console.log('firestore get todos');
-        firestoreGetTodos();
+        firestoreGetTodos((todos: TodoProps[]) => setTodos(todos))
+            .then(res => console.log('done getting todos'))
     }, []);
 
     const handleSetTodo = (todo: TodoProps): void => {
-        let newTodos = [...todos].map(currentTodo => {
-            if (currentTodo.id === todo.id) {
-                currentTodo.done = !currentTodo.done;
-            }
+        firestoreUpdateTodo({
+            ...todo,
+            done: !todo.done,
+        }, (todo) => {
+            setTodos(() => {
+                return [...todos].map((currentTodo: TodoProps) => {
+                    if (currentTodo.id === todo.id) {
+                        currentTodo = todo;
+                    }
 
-            return currentTodo;
-        });
+                    return currentTodo;
+                });
+            });
+        })
 
-        setTodos(newTodos);
         setTodo('');
         setEditMode(null);
     }
@@ -185,29 +43,22 @@ export default function Page() {
             setTodo('');
 
             if (editMode === null) {
-                let newTodo: TodoProps = {
-                    id: uuidv4(),
-                    name: e.target.value,
-                    done: false,
-                };
-
-                addNewTodo({
-                    todoId: uuidv4(),
-                    todoName: e.target.value,
-                    todoDone: false
-                })
-
-                setTodos([...todos, newTodo]);
+                firestoreAddTodo(e.target.value, (todo: TodoProps) => setTodos([...todos, todo]));
             } else {
-                setTodos(() => {
-                    return [...todos].map(currentTodo => {
-                        if (currentTodo.id === editMode?.id) {
-                            currentTodo.name = e.target.value
-                        }
+                firestoreUpdateTodo({
+                    ...editMode,
+                    name: e.target.value,
+                }, (todo) => {
+                    setTodos(() => {
+                        return [...todos].map((currentTodo: TodoProps) => {
+                            if (currentTodo.id === todo.id) {
+                                currentTodo = todo;
+                            }
 
-                        return currentTodo;
+                            return currentTodo;
+                        });
                     });
-                });
+                })
 
                 setEditMode(null)
             }
@@ -215,7 +66,7 @@ export default function Page() {
     }
 
     const handleClearCompletedTodo = (): void => {
-        let newTodos = todos.filter(todo => !todo.done);
+        let newTodos = todos.filter((todo: TodoProps) => !todo.done);
 
         setTodos(() => newTodos)
     }
@@ -227,8 +78,9 @@ export default function Page() {
     }
 
     const handleMarkAll = (): void => {
-        setTodos(() => [...todos].map(todo => {
+        setTodos(() => [...todos].map((todo: TodoProps) => {
             todo.done = true;
+
             return todo;
         }));
     }
@@ -242,14 +94,14 @@ export default function Page() {
                             My Awesome Todo
                         </h2>
 
-                        {todos.filter(todo => !todo.done).length ? (
+                        {todos.filter((todo: TodoProps) => !todo.done).length ? (
                             <Button name={'Mark All Complete'} handleClick={handleMarkAll}/>
                         ) : null}
                     </div>
 
-                    {todos.filter(todo => !todo.done).length ? (
+                    {todos.filter((todo: TodoProps) => !todo.done).length ? (
                         <div className={'mt-4 space-y-4'}>
-                            {todos.filter(todo => !todo.done).map((todo) => (
+                            {todos.filter((todo: TodoProps) => !todo.done).map((todo) => (
                                 <div className={'flex items-center relative group'} key={todo.id}>
                                     <TodoItem handleClick={() => handleSetTodo(todo)}>
                                         <div>
@@ -296,10 +148,10 @@ export default function Page() {
                         Completed Todos
                     </h2>
 
-                    {todos.filter(todo => todo.done).length ? (
+                    {todos.filter((todo: TodoProps) => todo.done).length ? (
                         <>
                             <div className={'mt-4 space-y-4'}>
-                                {todos.filter(todo => todo.done).map((todo) => (
+                                {todos.filter((todo: TodoProps) => todo.done).map((todo) => (
                                     <TodoItem key={todo.id} handleClick={() => handleSetTodo(todo)}>
                                         <input
                                             type="checkbox"
